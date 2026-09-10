@@ -3,7 +3,7 @@
 // restore both the conversation position and the matching workspace snapshot.
 
 import { getAgentDir, type ExtensionAPI, type SessionEntry } from "@earendil-works/pi-coding-agent";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { lstat, mkdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
@@ -13,6 +13,149 @@ const EXTENSION_ID = "claude-rewind";
 const FORMAT_VERSION = 2;
 const MAX_CHECKPOINTS = 100;
 const GIT_TIMEOUT_MS = 120_000;
+
+type Locale = "en" | "zh";
+
+interface Messages {
+  invalidSnapshotPath: string;
+  outsideWorkspace: (path: string) => string;
+  linkedPaths: (shown: string, remaining: number) => string;
+  initializationFailed: (error: string) => string;
+  checkpointFailed: (error: string) => string;
+  userMessageMissing: string;
+  checkpointBindingFailed: (error: string) => string;
+  missingCheckpointTitle: string;
+  switchConversationOnly: string;
+  cancel: string;
+  summaryUnsupported: string;
+  selectedTask: string;
+  restoreTitle: (title: string) => string;
+  restoreBoth: string;
+  restoreCodeOnly: string;
+  restoredChanges: (count: number) => string;
+  restoreFailed: (error: string) => string;
+  statusDescription: string;
+  notReady: string;
+  undoAvailable: string;
+  undoUnavailable: string;
+  status: (count: number, maximum: number, undo: string) => string;
+  redoDescription: string;
+  nothingToUndo: string;
+  undoSucceeded: string;
+  undoFailed: (error: string) => string;
+}
+
+const MESSAGES: Record<Locale, Messages> = {
+  en: {
+    invalidSnapshotPath: "The snapshot contains an invalid path",
+    outsideWorkspace: (path) => `Refusing to restore a path outside the workspace: ${path}`,
+    linkedPaths: (shown, remaining) =>
+      `Restore cancelled to prevent writing through symbolic or hard links: ${shown}${remaining > 0 ? ` and ${remaining} more path${remaining === 1 ? "" : "s"}` : ""}`,
+    initializationFailed: (error) => `Rewind initialization failed: ${error}`,
+    checkpointFailed: (error) => `Failed to create a restore point: ${error}`,
+    userMessageMissing: "Pi has not persisted the current user message",
+    checkpointBindingFailed: (error) => `Failed to bind the restore point: ${error}`,
+    missingCheckpointTitle: "This task predates Rewind and has no matching workspace state",
+    switchConversationOnly: "Switch conversation only (keep workspace unchanged)",
+    cancel: "Cancel",
+    summaryUnsupported: "Synchronized workspace and conversation restore does not support branch summaries. Select the task again without a summary.",
+    selectedTask: "selected task",
+    restoreTitle: (title) => `Restore to before “${title}” was executed`,
+    restoreBoth: "Restore workspace and conversation (recommended)",
+    restoreCodeOnly: "Restore workspace only (keep conversation unchanged)",
+    restoredChanges: (count) => `Restored ${count} file change${count === 1 ? "" : "s"}`,
+    restoreFailed: (error) => `Workspace restore failed; conversation was not changed: ${error}`,
+    statusDescription: "Show Rewind restore points and latest restore status",
+    notReady: "Rewind is not ready",
+    undoAvailable: "available",
+    undoUnavailable: "none",
+    status: (count, maximum, undo) =>
+      `Historical restore points: ${count}/${maximum}; undo latest restore: ${undo}. A restore point is a user task with workspace state, not a restore count.`,
+    redoDescription: "Undo the most recent workspace and conversation restore",
+    nothingToUndo: "There is no restore operation to undo",
+    undoSucceeded: "Undid the latest restore; workspace and conversation are back to their previous state",
+    undoFailed: (error) => `Failed to undo the restore: ${error}`,
+  },
+  zh: {
+    invalidSnapshotPath: "快照包含无效路径",
+    outsideWorkspace: (path) => `拒绝恢复工作区外的路径：${path}`,
+    linkedPaths: (shown, remaining) =>
+      `为避免写穿链接，已取消恢复：${shown}${remaining > 0 ? ` 等 ${remaining + 5} 个路径` : ""}`,
+    initializationFailed: (error) => `Rewind 初始化失败：${error}`,
+    checkpointFailed: (error) => `创建恢复点失败：${error}`,
+    userMessageMissing: "Pi 尚未保存当前用户消息",
+    checkpointBindingFailed: (error) => `绑定恢复点失败：${error}`,
+    missingCheckpointTitle: "该任务发生在 Rewind 启用前，没有对应的代码状态",
+    switchConversationOnly: "仅切换对话（代码保持不变）",
+    cancel: "取消",
+    summaryUnsupported: "同步恢复代码和对话时不支持分支摘要；请重新选择并选择“不生成摘要”",
+    selectedTask: "所选任务",
+    restoreTitle: (title) => `恢复到执行「${title}」之前`,
+    restoreBoth: "恢复代码和对话（推荐）",
+    restoreCodeOnly: "仅恢复代码（对话保持不变）",
+    restoredChanges: (count) => `已恢复 ${count} 个文件变更`,
+    restoreFailed: (error) => `代码恢复失败，对话未切换：${error}`,
+    statusDescription: "查看 Rewind 历史恢复点和最近恢复状态",
+    notReady: "Rewind 尚未就绪",
+    undoAvailable: "可撤销",
+    undoUnavailable: "无",
+    status: (count, maximum, undo) =>
+      `历史恢复点：${count}/${maximum}；最近一次恢复：${undo}。恢复点表示拥有代码状态的用户任务数，不是回退次数。`,
+    redoDescription: "撤销最近一次代码和对话恢复",
+    nothingToUndo: "没有可撤销的恢复操作",
+    undoSucceeded: "已撤销最近一次恢复，代码和对话已回到操作前",
+    undoFailed: (error) => `撤销恢复失败：${error}`,
+  },
+};
+
+function localeFromValue(value: string | undefined): Locale | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().replace(/_/g, "-").toLowerCase();
+  if (/^(zh)(-|$)/.test(normalized)) return "zh";
+  if (/^(en)(-|$)/.test(normalized)) return "en";
+  return undefined;
+}
+
+function macOSLocale(): Locale | undefined {
+  if (process.platform !== "darwin") return undefined;
+  try {
+    const languages = execFileSync("defaults", ["read", "-g", "AppleLanguages"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const first = languages.match(/["']?([A-Za-z]{2,3}(?:[-_][A-Za-z0-9]+)*)["']?/);
+    const locale = localeFromValue(first?.[1]);
+    if (locale) return locale;
+  } catch {
+    // Fall through to AppleLocale and standard locale environment variables.
+  }
+  try {
+    return localeFromValue(execFileSync("defaults", ["read", "-g", "AppleLocale"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }));
+  } catch {
+    return undefined;
+  }
+}
+
+export function detectLocale(): Locale {
+  const override = localeFromValue(process.env.PI_CLAUDE_REWIND_LOCALE);
+  if (override) return override;
+  const system = macOSLocale();
+  if (system) return system;
+  for (const value of [
+    process.env.LC_ALL,
+    process.env.LC_MESSAGES,
+    process.env.LANGUAGE?.split(":")[0],
+    process.env.LANG,
+    Intl.DateTimeFormat().resolvedOptions().locale,
+  ]) {
+    const locale = localeFromValue(value);
+    if (locale) return locale;
+  }
+  return "en";
+}
 
 interface Checkpoint {
   entryId: string;
@@ -195,12 +338,12 @@ function parseNameStatusZ(output: string): Array<{ status: string; path: string 
   return changes;
 }
 
-function assertSafeRelativePath(workTree: string, path: string): string {
-  if (!path || path.includes("\0")) throw new Error("快照包含无效路径");
+function assertSafeRelativePath(workTree: string, path: string, messages: Messages): string {
+  if (!path || path.includes("\0")) throw new Error(messages.invalidSnapshotPath);
   const absolute = resolve(workTree, path);
   const rel = relative(workTree, absolute);
   if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || resolve(workTree, rel) !== absolute) {
-    throw new Error(`拒绝恢复工作区外的路径：${path}`);
+    throw new Error(messages.outsideWorkspace(path));
   }
   return absolute;
 }
@@ -238,12 +381,13 @@ async function verifyChangedPathsAreRegular(
   workTree: string,
   targetCommit: string,
   changes: Array<{ status: string; path: string }>,
+  messages: Messages,
 ): Promise<void> {
   const linksInTarget = await targetSymlinks(gitDir, workTree, targetCommit);
   const unsafe: string[] = [];
 
   for (const change of changes) {
-    const absolute = assertSafeRelativePath(workTree, change.path);
+    const absolute = assertSafeRelativePath(workTree, change.path, messages);
     if (linksInTarget.has(change.path) || await pathHasLinkedAncestor(workTree, absolute)) {
       unsafe.push(change.path);
     }
@@ -251,8 +395,7 @@ async function verifyChangedPathsAreRegular(
 
   if (unsafe.length > 0) {
     const shown = unsafe.slice(0, 5).join(", ");
-    const suffix = unsafe.length > 5 ? ` 等 ${unsafe.length} 个路径` : "";
-    throw new Error(`为避免写穿链接，已取消恢复：${shown}${suffix}`);
+    throw new Error(messages.linkedPaths(shown, Math.max(0, unsafe.length - 5)));
   }
 }
 
@@ -285,7 +428,8 @@ export async function restoreWorkspaceSnapshot(
   const changes = parseNameStatusZ(diff.stdout);
   if (changes.length === 0) return 0;
 
-  await verifyChangedPathsAreRegular(gitDir, workTree, targetCommit, changes);
+  const messages = MESSAGES[detectLocale()];
+  await verifyChangedPathsAreRegular(gitDir, workTree, targetCommit, changes, messages);
 
   const indexPath = join(gitDir, `restore-index-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const env = { GIT_INDEX_FILE: indexPath };
@@ -307,7 +451,7 @@ export async function restoreWorkspaceSnapshot(
 
     for (const change of changes) {
       if (!change.status.startsWith("D")) continue;
-      const absolute = assertSafeRelativePath(workTree, change.path);
+      const absolute = assertSafeRelativePath(workTree, change.path, messages);
       await rm(absolute, { force: true });
       await removeEmptyParents(workTree, absolute);
     }
@@ -400,6 +544,7 @@ async function pruneCheckpoints(state: RuntimeState): Promise<void> {
 }
 
 export default function claudeRewind(pi: ExtensionAPI): void {
+  const messages = MESSAGES[detectLocale()];
   const state: RuntimeState = {
     ready: false,
     suppressTreeRestore: false,
@@ -432,7 +577,7 @@ export default function claudeRewind(pi: ExtensionAPI): void {
       updateStatus(ctx);
     }).catch((error) => {
       state.ready = false;
-      ctx.ui.notify(`回退插件初始化失败：${error instanceof Error ? error.message : String(error)}`, "error");
+      ctx.ui.notify(messages.initializationFailed(error instanceof Error ? error.message : String(error)), "error");
     });
   });
 
@@ -458,7 +603,7 @@ export default function claudeRewind(pi: ExtensionAPI): void {
       state.manifest.redo = undefined;
     }).catch((error) => {
       state.pending = undefined;
-      ctx.ui.notify(`创建回退点失败：${error instanceof Error ? error.message : String(error)}`, "warning");
+      ctx.ui.notify(messages.checkpointFailed(error instanceof Error ? error.message : String(error)), "warning");
     });
   });
 
@@ -470,7 +615,7 @@ export default function claudeRewind(pi: ExtensionAPI): void {
     await queue(state, async () => {
       if (!state.ready || !state.pending || !state.gitDir || !state.cwd || !state.stateDir || !state.manifest) return;
       const userEntry = latestUserEntry(ctx.sessionManager.getBranch());
-      if (!userEntry) throw new Error("Pi 尚未保存当前用户消息");
+      if (!userEntry) throw new Error(messages.userMessageMissing);
 
       const pending = state.pending;
       state.pending = undefined;
@@ -496,7 +641,7 @@ export default function claudeRewind(pi: ExtensionAPI): void {
       });
       updateStatus(ctx);
     }).catch((error) => {
-      ctx.ui.notify(`绑定回退点失败：${error instanceof Error ? error.message : String(error)}`, "warning");
+      ctx.ui.notify(messages.checkpointBindingFailed(error instanceof Error ? error.message : String(error)), "warning");
     });
   });
 
@@ -514,32 +659,32 @@ export default function claudeRewind(pi: ExtensionAPI): void {
     if (!isUserPrompt) return;
     if (!checkpoint) {
       if (ctx.hasUI) {
-        const choice = await ctx.ui.select("该任务发生在 Rewind 启用前，没有对应的代码状态", [
-          "仅切换对话（代码保持不变）",
-          "取消",
+        const choice = await ctx.ui.select(messages.missingCheckpointTitle, [
+          messages.switchConversationOnly,
+          messages.cancel,
         ]);
-        if (choice !== "仅切换对话（代码保持不变）") return { cancel: true };
+        if (choice !== messages.switchConversationOnly) return { cancel: true };
       }
       return;
     }
 
     if (!ctx.hasUI) return { cancel: true };
     if (event.preparation.userWantsSummary) {
-      ctx.ui.notify("同步恢复代码和对话时不支持分支摘要；请重新选择并选择“不生成摘要”", "warning");
+      ctx.ui.notify(messages.summaryUnsupported, "warning");
       return { cancel: true };
     }
 
     const prompt = checkpoint.prompt.replace(/\s+/g, " ").trim();
     const title = prompt.length > 80 ? `${prompt.slice(0, 79)}…` : prompt;
-    const choice = await ctx.ui.select(`恢复到执行「${title || "所选任务"}」之前`, [
-      "恢复代码和对话（推荐）",
-      "仅切换对话（代码保持不变）",
-      "仅恢复代码（对话保持不变）",
-      "取消",
+    const choice = await ctx.ui.select(messages.restoreTitle(title || messages.selectedTask), [
+      messages.restoreBoth,
+      messages.switchConversationOnly,
+      messages.restoreCodeOnly,
+      messages.cancel,
     ]);
 
-    if (!choice || choice === "取消") return { cancel: true };
-    if (choice === "仅切换对话（代码保持不变）") return;
+    if (!choice || choice === messages.cancel) return { cancel: true };
+    if (choice === messages.switchConversationOnly) return;
 
     try {
       await queue(state, async () => {
@@ -562,37 +707,34 @@ export default function claudeRewind(pi: ExtensionAPI): void {
           emergency,
           checkpoint.commit,
         );
-        ctx.ui.notify(`已恢复 ${changed} 个文件变更`, "info");
+        ctx.ui.notify(messages.restoredChanges(changed), "info");
       });
     } catch (error) {
-      ctx.ui.notify(`代码恢复失败，对话未回退：${error instanceof Error ? error.message : String(error)}`, "error");
+      ctx.ui.notify(messages.restoreFailed(error instanceof Error ? error.message : String(error)), "error");
       return { cancel: true };
     }
 
-    if (choice === "仅恢复代码（对话保持不变）") return { cancel: true };
+    if (choice === messages.restoreCodeOnly) return { cancel: true };
     return;
   });
 
   pi.registerCommand("rewind-status", {
-    description: "查看 Rewind 历史恢复点和最近恢复状态",
+    description: messages.statusDescription,
     handler: async (_args, ctx) => {
       if (!state.ready || !state.manifest) {
-        ctx.ui.notify("回退插件尚未就绪", "warning");
+        ctx.ui.notify(messages.notReady, "warning");
         return;
       }
-      const undoLatestRestore = state.manifest.redo ? "可撤销" : "无";
-      ctx.ui.notify(
-        `历史恢复点：${state.manifest.order.length}/${MAX_CHECKPOINTS}；最近一次恢复：${undoLatestRestore}。恢复点表示拥有代码状态的用户任务数，不是回退次数。`,
-        "info",
-      );
+      const undoLatestRestore = state.manifest.redo ? messages.undoAvailable : messages.undoUnavailable;
+      ctx.ui.notify(messages.status(state.manifest.order.length, MAX_CHECKPOINTS, undoLatestRestore), "info");
     },
   });
 
   pi.registerCommand("redo-rewind", {
-    description: "撤销最近一次代码和对话恢复",
+    description: messages.redoDescription,
     handler: async (_args, ctx) => {
       if (!state.ready || !state.gitDir || !state.cwd || !state.stateDir || !state.manifest?.redo) {
-        ctx.ui.notify("没有可撤销的恢复操作", "warning");
+        ctx.ui.notify(messages.nothingToUndo, "warning");
         return;
       }
 
@@ -616,10 +758,10 @@ export default function claudeRewind(pi: ExtensionAPI): void {
           const result = await ctx.navigateTree(redo.conversationLeafId, { summarize: false });
           if (result.cancelled) state.suppressTreeRestore = false;
         }
-        ctx.ui.notify("已撤销最近一次恢复，代码和对话已回到操作前", "info");
+        ctx.ui.notify(messages.undoSucceeded, "info");
       } catch (error) {
         state.suppressTreeRestore = false;
-        ctx.ui.notify(`撤销恢复失败：${error instanceof Error ? error.message : String(error)}`, "error");
+        ctx.ui.notify(messages.undoFailed(error instanceof Error ? error.message : String(error)), "error");
       }
     },
   });

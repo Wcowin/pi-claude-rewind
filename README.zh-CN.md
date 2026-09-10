@@ -19,6 +19,25 @@ Pi 本身已经有原生会话树。本扩展会把每条用户任务节点与�
 - 可记录未跟踪文件以及 Shell 命令产生的普通文件变化
 - 拒绝通过符号链接或硬链接恢复，防止写穿链接
 - 每个会话最多保留 100 个 checkpoint
+- 运行时中英文适配：中文系统显示中文，其他环境默认显示英文
+
+## 语言
+
+Rewind 每次被 Pi 加载时，按以下优先级选择界面语言：
+
+1. 显式设置的 `PI_CLAUDE_REWIND_LOCALE`（`zh-CN` 或 `en`）
+2. macOS“语言与地区”中的首选语言和区域
+3. `LC_ALL`、`LC_MESSAGES`、`LANGUAGE` 或 `LANG`
+4. 无法判断时默认英文
+
+需要时可以显式覆盖：
+
+```sh
+PI_CLAUDE_REWIND_LOCALE=zh-CN pi
+PI_CLAUDE_REWIND_LOCALE=en pi
+```
+
+修改环境变量后执行 `/reload`。状态栏的 `↶ Rewind` 保持语言中立。
 
 ## 要求
 

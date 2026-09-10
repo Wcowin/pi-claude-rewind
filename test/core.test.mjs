@@ -57,7 +57,7 @@ test("refuses to restore through a linked parent directory", async (t) => {
 
   await assert.rejects(
     restoreWorkspaceSnapshot(gitDir, workTree, after, before),
-    /链接/,
+    /链接|symbolic or hard links/,
   );
   assert.equal(await readFile(join(outside, "file.txt"), "utf8"), "outside\n");
 });

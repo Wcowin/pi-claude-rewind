@@ -19,6 +19,25 @@ Pi already has a native conversation tree. This extension connects each user-tas
 - Tracks ordinary files, including untracked files and changes made through shell commands
 - Refuses to restore through symbolic links or hard links
 - Keeps up to 100 checkpoints per session
+- Localized runtime UI: Chinese on Chinese systems, English otherwise
+
+## Language
+
+Rewind chooses its UI language each time Pi loads the extension:
+
+1. `PI_CLAUDE_REWIND_LOCALE`, when explicitly set to `zh-CN` or `en`
+2. macOS preferred language and locale
+3. `LC_ALL`, `LC_MESSAGES`, `LANGUAGE`, or `LANG`
+4. English fallback
+
+Override detection when needed:
+
+```sh
+PI_CLAUDE_REWIND_LOCALE=zh-CN pi
+PI_CLAUDE_REWIND_LOCALE=en pi
+```
+
+Run `/reload` after changing the environment. The status label `↶ Rewind` remains language-neutral.
 
 ## Requirements
 
