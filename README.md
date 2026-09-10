@@ -2,16 +2,16 @@
 
 Claude Code-style synchronized conversation and workspace rewind for [Pi](https://pi.dev).
 
-Pi already has a native conversation tree. This extension connects each user-message node to an isolated workspace snapshot, so navigating back can restore both sides of the session together.
+Pi already has a native conversation tree. This extension connects each user-task node to the workspace state from immediately before that task, so you can move between historical restore points while keeping code and conversation aligned.
 
 ## Features
 
 - Double `Escape` opens Pi's native conversation tree
 - A checkpoint is created automatically before every user prompt
-- Restore workspace and conversation together
-- Restore conversation only
-- Restore workspace only
-- `/redo-rewind` restores the state from immediately before the latest rewind
+- Restore workspace and conversation to the same historical node
+- Switch conversation only while leaving the workspace unchanged
+- Restore workspace only while leaving the conversation unchanged
+- `/redo-rewind` undoes the most recent restore operation
 - Checkpoints survive `/resume` and Pi restarts
 - Exact checkpoint-to-message binding through Pi session entry IDs
 - Snapshot metadata is persisted with `pi.appendEntry()` in the session tree
@@ -34,7 +34,7 @@ The workspace itself does not need to be a Git repository.
 pi install npm:pi-claude-rewind
 ```
 
-Until the npm package is published, install from GitHub:
+Alternatively, install from GitHub:
 
 ```sh
 pi install git:github.com/Wcowin/pi-claude-rewind
@@ -79,26 +79,28 @@ Reload Pi after installation or configuration changes:
 5. Choose an action:
 
 ```text
-Workspace + conversation (recommended)
-Conversation only
-Workspace only
+Restore workspace and conversation (recommended)
+Switch conversation only (keep workspace unchanged)
+Restore workspace only (keep conversation unchanged)
 Cancel
 ```
 
-When a user prompt is selected, Pi natively moves the conversation leaf to that prompt's parent and restores the selected prompt into the editor. The extension restores the workspace snapshot associated with the same message entry ID.
+The confirmation title says that Pi will restore the state from before the selected task was executed. Pi natively moves the conversation leaf to that prompt's parent and restores the selected prompt into the editor. The extension restores the workspace state associated with the same message entry ID.
+
+The status bar shows only `↶ Rewind`, which means the extension is ready. It deliberately does not show a cumulative number that could be mistaken for an undo count. Each historical restore point represents one user task with an associated workspace state; performing a restore does not add or remove restore points.
 
 ### Commands
 
 ```text
-/rewind-status   Show checkpoint and redo status
-/redo-rewind     Restore workspace and conversation to before the latest rewind
+/rewind-status   Show historical restore-point count and whether the latest restore can be undone
+/redo-rewind     Undo the most recent workspace-and-conversation restore
 ```
 
 ## How it works
 
 Pi emits `before_agent_start` before the current user message has been persisted. The extension snapshots the workspace there, then waits for Pi's `context` event. At `context`, Pi has persisted the user message and assigned its stable session-tree entry ID, but the model has not yet made edits. The extension binds the pending snapshot to that exact ID.
 
-During native `/tree` navigation, `session_before_tree` receives the selected `targetId`. The extension looks up the matching snapshot, saves an emergency redo point, restores the workspace, and only then allows Pi to navigate the conversation. A failed workspace restore cancels conversation navigation.
+During native `/tree` navigation, `session_before_tree` receives the selected `targetId`. The extension looks up the matching snapshot, saves an emergency undo point, restores the workspace, and only then allows Pi to navigate the conversation. A failed workspace restore cancels conversation navigation.
 
 Snapshots use a private bare Git object database under Pi's agent directory:
 

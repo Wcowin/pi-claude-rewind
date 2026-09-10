@@ -407,8 +407,7 @@ export default function claudeRewind(pi: ExtensionAPI): void {
   };
 
   function updateStatus(ctx: { ui: { setStatus: (id: string, text: string | undefined) => void } }): void {
-    const count = state.manifest?.order.length ?? 0;
-    ctx.ui.setStatus(EXTENSION_ID, state.ready ? `↶ ${count} 回退点` : undefined);
+    ctx.ui.setStatus(EXTENSION_ID, state.ready ? "↶ Rewind" : undefined);
   }
 
   pi.on("session_start", async (_event, ctx) => {
@@ -438,9 +437,9 @@ export default function claudeRewind(pi: ExtensionAPI): void {
   });
 
   // Pi emits before_agent_start before it persists the new user message. Capture
-  // the workspace here, but wait for turn_start to bind the snapshot to the
-  // real SessionEntry id. Looking up the latest user entry here would bind to
-  // the previous prompt and shift every checkpoint by one.
+  // the workspace here, but wait for context to bind the snapshot to the real
+  // SessionEntry id. Looking up the latest user entry here would bind to the
+  // previous prompt and shift every checkpoint by one.
   pi.on("before_agent_start", async (event, ctx) => {
     await queue(state, async () => {
       if (!state.ready || !state.gitDir || !state.cwd || !state.manifest) return;
@@ -515,32 +514,32 @@ export default function claudeRewind(pi: ExtensionAPI): void {
     if (!isUserPrompt) return;
     if (!checkpoint) {
       if (ctx.hasUI) {
-        const choice = await ctx.ui.select("该对话发生在回退插件启用前，没有可恢复的代码快照", [
-          "仅回退对话",
+        const choice = await ctx.ui.select("该任务发生在 Rewind 启用前，没有对应的代码状态", [
+          "仅切换对话（代码保持不变）",
           "取消",
         ]);
-        if (choice !== "仅回退对话") return { cancel: true };
+        if (choice !== "仅切换对话（代码保持不变）") return { cancel: true };
       }
       return;
     }
 
     if (!ctx.hasUI) return { cancel: true };
     if (event.preparation.userWantsSummary) {
-      ctx.ui.notify("代码同步回退不支持分支摘要；请重新选择并选择“不生成摘要”", "warning");
+      ctx.ui.notify("同步恢复代码和对话时不支持分支摘要；请重新选择并选择“不生成摘要”", "warning");
       return { cancel: true };
     }
 
     const prompt = checkpoint.prompt.replace(/\s+/g, " ").trim();
     const title = prompt.length > 80 ? `${prompt.slice(0, 79)}…` : prompt;
-    const choice = await ctx.ui.select(`回退到「${title || "所选对话"}」之前`, [
-      "代码和对话一起回退（推荐）",
-      "仅回退对话",
-      "仅恢复代码（保持当前对话）",
+    const choice = await ctx.ui.select(`恢复到执行「${title || "所选任务"}」之前`, [
+      "恢复代码和对话（推荐）",
+      "仅切换对话（代码保持不变）",
+      "仅恢复代码（对话保持不变）",
       "取消",
     ]);
 
     if (!choice || choice === "取消") return { cancel: true };
-    if (choice === "仅回退对话") return;
+    if (choice === "仅切换对话（代码保持不变）") return;
 
     try {
       await queue(state, async () => {
@@ -570,27 +569,30 @@ export default function claudeRewind(pi: ExtensionAPI): void {
       return { cancel: true };
     }
 
-    if (choice === "仅恢复代码（保持当前对话）") return { cancel: true };
+    if (choice === "仅恢复代码（对话保持不变）") return { cancel: true };
     return;
   });
 
   pi.registerCommand("rewind-status", {
-    description: "查看 Claude 风格回退插件状态",
+    description: "查看 Rewind 历史恢复点和最近恢复状态",
     handler: async (_args, ctx) => {
       if (!state.ready || !state.manifest) {
         ctx.ui.notify("回退插件尚未就绪", "warning");
         return;
       }
-      const redo = state.manifest.redo ? "可用" : "无";
-      ctx.ui.notify(`回退点：${state.manifest.order.length}/${MAX_CHECKPOINTS}，重做：${redo}`, "info");
+      const undoLatestRestore = state.manifest.redo ? "可撤销" : "无";
+      ctx.ui.notify(
+        `历史恢复点：${state.manifest.order.length}/${MAX_CHECKPOINTS}；最近一次恢复：${undoLatestRestore}。恢复点表示拥有代码状态的用户任务数，不是回退次数。`,
+        "info",
+      );
     },
   });
 
   pi.registerCommand("redo-rewind", {
-    description: "撤销最近一次代码和对话回退",
+    description: "撤销最近一次代码和对话恢复",
     handler: async (_args, ctx) => {
       if (!state.ready || !state.gitDir || !state.cwd || !state.stateDir || !state.manifest?.redo) {
-        ctx.ui.notify("没有可重做的回退", "warning");
+        ctx.ui.notify("没有可撤销的恢复操作", "warning");
         return;
       }
 
@@ -614,10 +616,10 @@ export default function claudeRewind(pi: ExtensionAPI): void {
           const result = await ctx.navigateTree(redo.conversationLeafId, { summarize: false });
           if (result.cancelled) state.suppressTreeRestore = false;
         }
-        ctx.ui.notify("已恢复到回退前的代码和对话", "info");
+        ctx.ui.notify("已撤销最近一次恢复，代码和对话已回到操作前", "info");
       } catch (error) {
         state.suppressTreeRestore = false;
-        ctx.ui.notify(`重做失败：${error instanceof Error ? error.message : String(error)}`, "error");
+        ctx.ui.notify(`撤销恢复失败：${error instanceof Error ? error.message : String(error)}`, "error");
       }
     },
   });

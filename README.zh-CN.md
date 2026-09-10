@@ -2,16 +2,16 @@
 
 为 [Pi](https://pi.dev) 提供类似 Claude Code 的“对话与工作区同步回退”。
 
-Pi 本身已经有原生会话树。本扩展会把每条用户消息节点与一个独立的工作区快照精确绑定，因此选择历史对话时，可以让代码和对话一起回到当时的状态。
+Pi 本身已经有原生会话树。本扩展会把每条用户任务节点与执行该任务之前的工作区状态精确绑定，因此可以在历史恢复点之间切换，并让代码和对话回到同一时刻。
 
 ## 功能
 
 - 双击 `Esc` 打开 Pi 原生会话树
 - 每次发送用户提示词前自动建立 checkpoint
-- 代码与对话一起回退
-- 仅回退对话
-- 仅恢复代码
-- `/redo-rewind` 恢复到最近一次回退之前
+- 恢复代码和对话到同一个历史节点
+- 仅切换对话，代码保持不变
+- 仅恢复代码，对话保持不变
+- `/redo-rewind` 撤销最近一次恢复操作
 - `/resume` 或重启 Pi 后仍可使用 checkpoint
 - 通过 Pi 会话节点 `entryId` 精确绑定快照与用户消息
 - 使用 `pi.appendEntry()` 将 checkpoint 元数据写进 Pi 会话树
@@ -30,13 +30,13 @@ Pi 本身已经有原生会话树。本扩展会把每条用户消息节点与�
 
 ## 安装
 
-npm 发布后：
+从 npm 安装：
 
 ```sh
 pi install npm:pi-claude-rewind
 ```
 
-在 npm 发布前，可以从 GitHub 安装：
+也可以从 GitHub 安装：
 
 ```sh
 pi install git:github.com/Wcowin/pi-claude-rewind
@@ -64,7 +64,7 @@ pi install /absolute/path/to/pi-claude-rewind
 
 - `doubleEscapeAction: "tree"`：双击 `Esc` 打开原生对话树。
 - `treeFilterMode: "user-only"`：选择器只显示用户消息，更接近 Claude Code。
-- `branchSummary.skipPrompt: true`：回退过程中不再额外询问是否生成分支摘要。
+- `branchSummary.skipPrompt: true`：恢复过程中不再额外询问是否生成分支摘要。
 
 安装或修改设置后执行：
 
@@ -81,26 +81,28 @@ pi install /absolute/path/to/pi-claude-rewind
 5. 选择恢复方式：
 
 ```text
-代码和对话一起回退（推荐）
-仅回退对话
-仅恢复代码（保持当前对话）
+恢复代码和对话（推荐）
+仅切换对话（代码保持不变）
+仅恢复代码（对话保持不变）
 取消
 ```
 
-选择用户消息后，Pi 原生会把对话叶节点移动到该消息的父节点，并把原提示词放回输入框；本扩展同时恢复绑定到该消息 `entryId` 的工作区快照。
+确认窗口会显示“恢复到执行「所选任务」之前”。选择用户任务后，Pi 原生会把对话叶节点移动到该消息的父节点，并把原提示词放回输入框；本扩展同时恢复绑定到该消息 `entryId` 的工作区状态。
+
+状态栏只显示 `↶ Rewind`，表示扩展已就绪，不再显示容易被误解为回退次数的累计数字。每个历史恢复点代表一条拥有对应代码状态的用户任务；执行恢复本身不会增加或减少恢复点。
 
 ### 命令
 
 ```text
-/rewind-status   查看 checkpoint 数量和 redo 状态
-/redo-rewind     恢复最近一次回退之前的代码和对话
+/rewind-status   查看历史恢复点数量及最近一次恢复是否可撤销
+/redo-rewind     撤销最近一次代码和对话恢复
 ```
 
 ## 工作原理
 
 Pi 在当前用户消息写入会话之前触发 `before_agent_start`。扩展在这个事件中创建工作区快照，但暂不绑定消息 ID。随后，在 Pi 的 `context` 事件中，用户消息已经持久化并获得稳定的会话树 `entryId`，同时模型还没有开始修改文件；扩展就在这里把待处理快照绑定到真实 ID。
 
-使用原生 `/tree` 导航时，`session_before_tree` 会提供选中的 `targetId`。扩展查找对应快照，先保存一个紧急 redo 点，再恢复工作区；只有恢复成功，才允许 Pi 继续回退对话。代码恢复失败会取消对话跳转。
+使用原生 `/tree` 导航时，`session_before_tree` 会提供选中的 `targetId`。扩展查找对应快照，先保存一个紧急撤销点，再恢复工作区；只有恢复成功，才允许 Pi 继续切换对话。代码恢复失败会取消对话跳转。
 
 快照保存在 Pi agent 目录下的独立 bare Git 对象库：
 
