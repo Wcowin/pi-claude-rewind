@@ -1,0 +1,56 @@
+{
+  "name": "pi-claude-rewind",
+  "version": "0.1.0",
+  "description": "Claude Code-style synchronized conversation and workspace rewind for Pi",
+  "type": "module",
+  "license": "MIT",
+  "author": "Wcowin",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Wcowin/pi-claude-rewind.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Wcowin/pi-claude-rewind/issues"
+  },
+  "homepage": "https://github.com/Wcowin/pi-claude-rewind#readme",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "rewind",
+    "checkpoint",
+    "undo",
+    "redo",
+    "conversation",
+    "workspace",
+    "claude-code"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.mjs",
+    "check": "npm run typecheck && npm test",
+    "prepack": "npm run check"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.85.1"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.85.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
