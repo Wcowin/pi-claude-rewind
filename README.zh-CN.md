@@ -1,5 +1,11 @@
 # pi-claude-rewind
 
+[![npm 版本](https://img.shields.io/npm/v/pi-claude-rewind.svg)](https://www.npmjs.com/package/pi-claude-rewind)
+[![npm 下载量](https://img.shields.io/npm/dm/pi-claude-rewind.svg)](https://www.npmjs.com/package/pi-claude-rewind)
+[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522.19.0-green.svg)](https://nodejs.org)
+[![许可证: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Wcowin/pi-claude-rewind.svg)](https://github.com/Wcowin/pi-claude-rewind/stargazers)
+
 为 [Pi](https://pi.dev) 提供类似 Claude Code 的“对话与工作区同步回退”。
 
 Pi 本身已经有原生会话树。本扩展会把每条用户任务节点与执行该任务之前的工作区状态精确绑定，因此可以在历史恢复点之间切换，并让代码和对话回到同一时刻。

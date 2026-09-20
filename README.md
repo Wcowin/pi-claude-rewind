@@ -1,5 +1,11 @@
 # pi-claude-rewind
 
+[![npm version](https://img.shields.io/npm/v/pi-claude-rewind.svg)](https://www.npmjs.com/package/pi-claude-rewind)
+[![npm downloads](https://img.shields.io/npm/dm/pi-claude-rewind.svg)](https://www.npmjs.com/package/pi-claude-rewind)
+[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522.19.0-green.svg)](https://nodejs.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Wcowin/pi-claude-rewind.svg)](https://github.com/Wcowin/pi-claude-rewind/stargazers)
+
 Claude Code-style synchronized conversation and workspace rewind for [Pi](https://pi.dev).
 
 Pi already has a native conversation tree. This extension connects each user-task node to the workspace state from immediately before that task, so you can move between historical restore points while keeping code and conversation aligned.
